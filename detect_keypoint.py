@@ -78,7 +78,7 @@ if __name__ == "__main__":
     detector = DetectKeypoint('yolov8m-pose.pt')
 
     # Carrega uma imagem de teste
-    img = cv2.imread('test_image.jpg')
+    img = cv2.imread('bus.jpg')
 
     # Faz a inferência e obtém os resultados
     results = detector(img)
