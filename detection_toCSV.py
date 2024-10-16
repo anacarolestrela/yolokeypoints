@@ -134,7 +134,10 @@ def process_directories(directories, output_csv):
             'right_wrist_x', 'right_wrist_y',
             'left_hip_x', 'left_hip_y',
             'right_hip_x', 'right_hip_y',
-
+            'left_knee_x', 'left_knee_y',
+            'right_knee_x', 'right_knee_y',
+            'left_ankle_x', 'left_ankle_y',
+            'right_ankle_x', 'right_ankle_y'
         ])
         
         for directory, pose_category in directories:
