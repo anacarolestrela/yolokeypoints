@@ -60,18 +60,39 @@ class DetectKeypoint:
         }
         return keypoints
 
-    def get_xy_keypoint(self, results) -> dict:
-        if results.keypoints is None or results.keypoints.xyn.shape[0] == 0:
+    def get_central_keypoint(self, results, img_shape) -> dict:
+        if results.keypoints is None or results.keypoints.xyn is None or results.keypoints.xyn.shape[0] == 0:
             print("Nenhum keypoint detectado.")
             return {}
 
-        result_keypoint = results.keypoints.xyn.cpu().numpy()[0]  # Normalizado entre 0 e 1
-        keypoint_data = self.extract_keypoint(result_keypoint)
+        # Centro da imagem
+        img_center_x = img_shape[1] / 2
+        img_center_y = img_shape[0] / 2
+
+        # Encontrar a pessoa mais centralizada
+        min_distance = float('inf')
+        central_keypoint = None
+
+        for i, box in enumerate(results.boxes.xyxy):  # Itera sobre cada bounding box
+            # Calcula o centro do bounding box
+            box_center_x = (box[0] + box[2]) / 2
+            box_center_y = (box[1] + box[3]) / 2
+            distance_to_center = np.sqrt((box_center_x - img_center_x) ** 2 + (box_center_y - img_center_y) ** 2)
+
+            if distance_to_center < min_distance:
+                min_distance = distance_to_center
+                central_keypoint = results.keypoints.xyn.cpu().numpy()[i]  # Pega o keypoint mais centralizado
+
+        # Se não encontrou keypoints, retorna vazio
+        if central_keypoint is None:
+            return {}
+
+        keypoint_data = self.extract_keypoint(central_keypoint)
         return keypoint_data
 
     def __call__(self, image: np.ndarray):
-        results = self.model(image)[0]
-        return results
+        results = self.model(image)
+        return results[0]  # Retorna os resultados da primeira imagem processada
 
 def flatten_keypoints(keypoints: dict) -> list:
     flattened = []
@@ -113,10 +134,7 @@ def process_directories(directories, output_csv):
             'right_wrist_x', 'right_wrist_y',
             'left_hip_x', 'left_hip_y',
             'right_hip_x', 'right_hip_y',
-            'left_knee_x', 'left_knee_y',
-            'right_knee_x', 'right_knee_y',
-            'left_ankle_x', 'left_ankle_y',
-            'right_ankle_x', 'right_ankle_y'
+
         ])
         
         for directory, pose_category in directories:
@@ -124,8 +142,8 @@ def process_directories(directories, output_csv):
                 if filename.endswith('.jpg') or filename.endswith('.png'):
                     img_path = os.path.join(directory, filename)
                     img = cv2.imread(img_path)
-                    results = detector(img)
-                    keypoints = detector.get_xy_keypoint(results)
+                    results = detector(img)  # Chama o detector diretamente
+                    keypoints = detector.get_central_keypoint(results, img.shape)  # Obter keypoints da pessoa mais centralizada
                     if keypoints and has_valid_keypoints(keypoints):
                         flattened_keypoints = flatten_keypoints(keypoints)
                         row = [filename, pose_category] + flattened_keypoints
@@ -143,6 +161,5 @@ if __name__ == "__main__":
         ('dataset_ofc/go_forward', 'go_forward'),
         ('dataset_ofc/go_back', 'go_back'),
         ('dataset_ofc/nao_acao', 'nao_acao'),
-        
     ]
     process_directories(directories, 'kpdataset.csv')
