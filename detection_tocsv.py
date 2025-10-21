@@ -1,0 +1,176 @@
+import os
+import csv
+import sys
+import cv2
+import numpy as np
+from pydantic import BaseModel
+from ultralytics import YOLO
+
+# Define keypoints using a Pydantic model
+class GetKeypoint(BaseModel):
+    NOSE:           int = 0
+    LEFT_EYE:       int = 1
+    RIGHT_EYE:      int = 2
+    LEFT_EAR:       int = 3
+    RIGHT_EAR:      int = 4
+    LEFT_SHOULDER:  int = 5
+    RIGHT_SHOULDER: int = 6
+    LEFT_ELBOW:     int = 7
+    RIGHT_ELBOW:    int = 8
+    LEFT_WRIST:     int = 9
+    RIGHT_WRIST:    int = 10
+    LEFT_HIP:       int = 11
+    RIGHT_HIP:      int = 12
+    LEFT_KNEE:      int = 13
+    RIGHT_KNEE:     int = 14
+    LEFT_ANKLE:     int = 15
+    RIGHT_ANKLE:    int = 16
+
+# Classe para detectar keypoints usando o modelo YOLOv8 de pose
+class DetectKeypoint:
+    def __init__(self, yolov8_model='yolov8m-pose.pt'):
+        self.yolov8_model = yolov8_model
+        self.get_keypoint = GetKeypoint()
+        self.__load_model()
+
+    def __load_model(self):
+        if not self.yolov8_model.split('-')[-1] == 'pose.pt':
+            sys.exit('Model not YOLOv8 pose. Please provide a pose model.')
+        self.model = YOLO(self.yolov8_model)
+
+    def extract_keypoint(self, keypoint: np.ndarray) -> dict:
+        keypoints = {
+            'nose': keypoint[self.get_keypoint.NOSE],
+            'left_eye': keypoint[self.get_keypoint.LEFT_EYE],
+            'right_eye': keypoint[self.get_keypoint.RIGHT_EYE],
+            'left_ear': keypoint[self.get_keypoint.LEFT_EAR],
+            'right_ear': keypoint[self.get_keypoint.RIGHT_EAR],
+            'left_shoulder': keypoint[self.get_keypoint.LEFT_SHOULDER],
+            'right_shoulder': keypoint[self.get_keypoint.RIGHT_SHOULDER],
+            'left_elbow': keypoint[self.get_keypoint.LEFT_ELBOW],
+            'right_elbow': keypoint[self.get_keypoint.RIGHT_ELBOW],
+            'left_wrist': keypoint[self.get_keypoint.LEFT_WRIST],
+            'right_wrist': keypoint[self.get_keypoint.RIGHT_WRIST],
+            'left_hip': keypoint[self.get_keypoint.LEFT_HIP],
+            'right_hip': keypoint[self.get_keypoint.RIGHT_HIP],
+            'left_knee': keypoint[self.get_keypoint.LEFT_KNEE],
+            'right_knee': keypoint[self.get_keypoint.RIGHT_KNEE],
+            'left_ankle': keypoint[self.get_keypoint.LEFT_ANKLE],
+            'right_ankle': keypoint[self.get_keypoint.RIGHT_ANKLE],
+        }
+        return keypoints
+
+    def get_central_keypoint(self, results, img_shape) -> dict:
+        if results.keypoints is None or results.keypoints.xyn is None or results.keypoints.xyn.shape[0] == 0:
+            print("Nenhum keypoint detectado.")
+            return {}
+
+        # Centro da imagem
+        img_center_x = img_shape[1] / 2
+        img_center_y = img_shape[0] / 2
+
+        # Encontrar a pessoa mais centralizada
+        min_distance = float('inf')
+        central_keypoint = None
+
+        boxes_cpu = results.boxes.xyxy.cpu().numpy()
+
+        for i, box in enumerate(boxes_cpu):  # Itera sobre o array NumPy na CPU
+            # Calcula o centro do bounding box
+            box_center_x = (box[0] + box[2]) / 2
+            box_center_y = (box[1] + box[3]) / 2
+            
+            # O cálculo de distância agora é feito com variáveis Python/NumPy,
+            # evitando o erro de tensor CUDA.
+            distance_to_center = np.sqrt((box_center_x - img_center_x) ** 2 + (box_center_y - img_center_y) ** 2)
+
+            if distance_to_center < min_distance:
+                min_distance = distance_to_center
+                # Esta linha já estava correta (results.keypoints.xyn.cpu().numpy()[i])
+                central_keypoint = results.keypoints.xyn.cpu().numpy()[i]
+
+        # Se não encontrou keypoints, retorna vazio
+        if central_keypoint is None:
+            return {}
+
+        keypoint_data = self.extract_keypoint(central_keypoint)
+        return keypoint_data
+
+    def __call__(self, image: np.ndarray):
+        results = self.model(image)
+        return results[0]  # Retorna os resultados da primeira imagem processada
+
+def flatten_keypoints(keypoints: dict) -> list:
+    flattened = []
+    for key in keypoints:
+        flattened.extend([keypoints[key][0], keypoints[key][1]])  # Adiciona x, y separadamente
+    return flattened
+
+def has_valid_keypoints(keypoints: dict) -> bool:
+    """Verifica se todos os keypoints de 0 a 12 têm valores válidos (não são 0 ou NaN)."""
+    required_keypoints = [
+        'nose', 'left_eye', 'right_eye', 'left_ear', 'right_ear',
+        'left_shoulder', 'right_shoulder', 'left_elbow', 'right_elbow',
+        'left_wrist', 'right_wrist', 'left_hip', 'right_hip'
+    ]
+    
+    for key in required_keypoints:
+        x, y = keypoints[key]
+        if x == 0 or y == 0 or np.isnan(x) or np.isnan(y):
+            return False
+    return True
+
+def process_directories(directories, output_csv):
+    detector = DetectKeypoint('yolov8m-pose.pt')
+    with open(output_csv, mode='w', newline='') as file:
+        writer = csv.writer(file)
+        # Write the header
+        writer.writerow([
+            'filename', 'pose_category',
+            'nose_x', 'nose_y',
+            'left_eye_x', 'left_eye_y',
+            'right_eye_x', 'right_eye_y',
+            'left_ear_x', 'left_ear_y',
+            'right_ear_x', 'right_ear_y',
+            'left_shoulder_x', 'left_shoulder_y',
+            'right_shoulder_x', 'right_shoulder_y',
+            'left_elbow_x', 'left_elbow_y',
+            'right_elbow_x', 'right_elbow_y',
+            'left_wrist_x', 'left_wrist_y',
+            'right_wrist_x', 'right_wrist_y',
+            'left_hip_x', 'left_hip_y',
+            'right_hip_x', 'right_hip_y',
+            'left_knee_x', 'left_knee_y',
+            'right_knee_x', 'right_knee_y',
+            'left_ankle_x', 'left_ankle_y',
+            'right_ankle_x', 'right_ankle_y'
+        ])
+        
+        for directory, pose_category in directories:
+            for filename in os.listdir(directory):
+                if filename.endswith('.jpg') or filename.endswith('.png'):
+                    img_path = os.path.join(directory, filename)
+                    img = cv2.imread(img_path)
+                    results = detector(img)  # Chama o detector diretamente
+                    keypoints = detector.get_central_keypoint(results, img.shape)  # Obter keypoints da pessoa mais centralizada
+                    if keypoints and has_valid_keypoints(keypoints):
+                        flattened_keypoints = flatten_keypoints(keypoints)
+                        row = [filename, pose_category] + flattened_keypoints
+                        writer.writerow(row)
+
+# Processar as imagens das pastas e gerar o CSV
+if __name__ == "__main__":
+    directories = [
+        # ('vertical_dataset/takeoff', 'takeoff'),
+        ('vertical_dataset/land', 'land'),
+        ('vertical_dataset/go_up', 'go_up'),
+        ('vertical_dataset/go_down', 'go_down'),
+        ('vertical_dataset/go_side', 'go_side'),
+        ('vertical_dataset/go_forward', 'go_forward'),
+        ('vertical_dataset/go_back', 'go_back'),
+        ('vertical_dataset/nao_acao', 'nao_acao'),
+        ('vertical_dataset/cw', 'cw'),
+
+        
+    ]
+    process_directories(directories, 'cbrvertical_dataset.csv')
