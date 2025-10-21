@@ -1,5 +1,5 @@
 #!/bin/bash
-//só funciona pra linux/wsl
+## só funciona pra linux/wsl
 
 
 mkdir -p frames
